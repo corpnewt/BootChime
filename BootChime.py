@@ -58,6 +58,7 @@ class BootChime:
                     for l in ioreg[::-1]:
                         if current_codec["line"] in l:
                             # Found it - gather pad, enable found
+                            pad = len(l.split("+")[0])
                             found = True
                         if not found: continue # Don't care unless we're found
                         # Check for <class IOPCIDevice, and get pad if shorter
