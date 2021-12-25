@@ -145,15 +145,24 @@ class BootChime:
                 bits = 0
             elif menu.lower().startswith("bin:"):
                 # Binary - attempt to decode the value
-                try: bits = int(menu.split(":")[-1],2)
+                try:
+                    temp_bits = int(menu.split(":")[-1],2)
+                    assert 0 <= temp_bits < 32
+                    bits = temp_bits
                 except: pass # Bad value
             elif menu.lower().startswith("hex:"):
                 # Hexadecimal - attempt to decode the value
-                try: bits = int(menu.split(":")[-1].replace(" ","").strip("<>"),16)
+                try:
+                    temp_bits = int(menu.split(":")[-1].replace(" ","").strip("<>"),16)
+                    assert 0 <= temp_bits < 32
+                    bits = temp_bits
                 except: pass # Bad value
             elif menu.lower().startswith("dec:"):
                 # Decimal - attempt to decode the value
-                try: bits = int(menu.split(":")[-1])
+                try:
+                    temp_bits = int(menu.split(":")[-1])
+                    assert 0 <= temp_bits < 32
+                    bits = temp_bits
                 except: pass # Bad value
             else:
                 num_list = [int(x) for x in menu.replace(" ","").split(",") if x.isdigit() and 0<=int(x)<32]
