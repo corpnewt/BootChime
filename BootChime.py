@@ -111,6 +111,59 @@ class BootChime:
         print("")
         self.u.grab("Press [enter] to return...")
 
+    def get_mask(self):
+        bits = self.settings.get("audio_out_mask",0)
+        if not isinstance(bits,int): bits = 0
+        while True:
+            self.u.head("AudioOutMask")
+            print("")
+            print("Note:  Requires OC 0.7.7 or newer!")
+            print("")
+            bin_str = "{0:b}".format(bits).rjust(32,"0")
+            print("Binary:  {}".format(bin_str))
+            print("Hex:     0x{}".format(hex(bits)[2:].upper()))
+            print("Decimal: {}".format(bits))
+            enabled_list = [str(i) for i,x in enumerate(bin_str[::-1]) if x != "0"]
+            print("Enabled: {}".format(",".join(enabled_list) if enabled_list else "None"))
+            print("")
+            print("A. Enable All")
+            print("N. Enable None")
+            print("")
+            print("M. Return to menu")
+            print("Q. Quit")
+            print("")
+            print("To toggle outputs, pass them in a comma delimited list from 0-31 (eg: 1,2,3)")
+            print("You can pass masks with the bin, hex, or dec prefix to decode them")
+            print("eg: bin:0001010 or hex:0xABCD or dec:1234")
+            print("")
+            menu = self.u.grab("Please select an option:  ")
+            if menu.lower() == "m": return
+            elif menu.lower() == "q": self.u.custom_quit()
+            elif menu.lower() == "a":
+                bits = int("1"*32,2)
+            elif menu.lower() == "n":
+                bits = 0
+            elif menu.lower().startswith("bin:"):
+                # Binary - attempt to decode the value
+                try: bits = int(menu.split(":")[-1],2)
+                except: pass # Bad value
+            elif menu.lower().startswith("hex:"):
+                # Hexadecimal - attempt to decode the value
+                try: bits = int(menu.split(":")[-1].replace(" ","").strip("<>"),16)
+                except: pass # Bad value
+            elif menu.lower().startswith("dec:"):
+                # Decimal - attempt to decode the value
+                try: bits = int(menu.split(":")[-1])
+                except: pass # Bad value
+            else:
+                num_list = [int(x) for x in menu.replace(" ","").split(",") if x.isdigit() and 0<=int(x)<32]
+                if not num_list: continue # Nothing to do
+                # Let's toggle bits!
+                for num in num_list:
+                    bits ^= 1 << num
+            self.settings["audio_out_mask"] = bits
+            self.save_settings()
+
     def main(self):
         self.codecs = self.get_codecs()
         self.u.head()
@@ -151,10 +204,11 @@ class BootChime:
         print("")
         if volume_amp is not None:
             print("M. Clear max SystemAudioVolume from settings")
-        if sav:
-            print("S. Save current SystemAudioVolume as max")
+        if sav is not None:
             print("C. Clear SystemAudioVolume value from NVRAM")
-            print("")
+            print("S. Save current SystemAudioVolume as max")
+        print("O. Setup AudioOutMask (OC 0.7.7+)")
+        print("")
         print("Q. Quit")
         print("")
         menu = self.u.grab("Please select an option:  ").lower()
@@ -169,6 +223,8 @@ class BootChime:
         if volume_amp is not None and menu == "m":
             self.settings.pop("max_volume",None)
             self.save_settings()
+        if menu == "o":
+            self.get_mask()
 
 if __name__ == '__main__':
     if 2/3 == 0: input = raw_input
