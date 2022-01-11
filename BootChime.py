@@ -85,17 +85,26 @@ class BootChime:
                 current_codec = {}
         return codecs
 
-    def get_audio_volume(self):
+    def get_audio_volume(self, key = "SystemAudioVolume"):
         # Function to attempt to get SystemAudioVolume from NVRAM
-        o = self.r.run({"args":["nvram","-x","SystemAudioVolume"]})
+        o = self.r.run({"args":["nvram","-x",key]})
         if o[2] != 0: return None
         # Got something - try to load it, and return the value
         try:
             p = plist.loads(o[0])
         except:
             return None
-        data = plist.extract_data(p.get("SystemAudioVolume",None))
+        data = plist.extract_data(p.get(key,None))
         return int(binascii.hexlify(data),16) if data is not None else None
+
+    def get_audio_db(self):
+        # Function to attempt to get SystemAudioVolumeDB from NVRAM
+        sdb = self.get_audio_volume(key="SystemAudioVolumeDB")
+        if sdb is None: return sdb
+        # Convert to a signed 8-bit int
+        sdb_signed = sdb
+        sdb_signed -= (sdb_signed & 0x80) << 1 # Subtract 256 if bit 7 is set
+        return (sdb_signed,sdb)
 
     def get_volume_amp(self,max_volume=0):
         if not isinstance(max_volume,(int,float)): return None
@@ -194,6 +203,11 @@ class BootChime:
         print("Current SystemAudioVolume:\n  --> {}{}".format(
             sav if sav is not None else "NOT SET",
             " (0x{})".format(hex(sav)[2:].upper()) if sav is not None else ""
+        ))
+        savdb = self.get_audio_db()
+        print("Current SystemAudioVolumeDB (OC 0.7.7+):\n  --> {}{}".format(
+            savdb[0] if savdb is not None else "NOT SET",
+            " (0x{})".format(hex(savdb[1])[2:].upper()) if savdb is not None else ""
         ))
         volume_amp = None
         if "max_volume" in self.settings:
