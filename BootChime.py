@@ -102,8 +102,7 @@ class BootChime:
         sdb = self.get_audio_volume(key="SystemAudioVolumeDB")
         if sdb is None: return sdb
         # Convert to a signed 8-bit int
-        sdb_signed = sdb
-        sdb_signed -= (sdb_signed & 0x80) << 1 # Subtract 256 if bit 7 is set
+        sdb_signed = sdb-((sdb & 0x80) << 1) # Subtract 256 if bit 7 is set
         return (sdb_signed,sdb)
 
     def get_volume_amp(self,max_volume=0):
