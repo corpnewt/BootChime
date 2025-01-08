@@ -1,4 +1,4 @@
-from Scripts import run, utils, plist
+from Scripts import run, utils, plist, ioreg
 import os, sys, json, binascii
 
 class BootChime:
@@ -13,6 +13,7 @@ class BootChime:
             self.u.grab("Press [enter] to exit...")
             exit()
         self.r = run.Run()
+        self.i = ioreg.IOReg()
         self.codecs = []
         self.settings_file = "./Scripts/settings.json"
         cwd = os.getcwd()
@@ -34,55 +35,45 @@ class BootChime:
 
     def get_codecs(self):
         if self.codecs: return self.codecs
-        # We haven't already gotten them - let's populate that list
-        iohda = self.r.run({"args":["ioreg","-w0","-rxn","IOHDACodecDevice"]})[0].split("\n")
-        ioreg = self.r.run({"args":["ioreg","-lw0"]})[0].split("\n")
-        # First, we walk the iohda list, and find our codec info
+
+        def get_pad(device):
+            # Returns the number of chars before hitting +-o
+            return len(device.split("+-o ")[0])
+
+        def trim_devices(devices,device):
+            # Helper to walk the passed devices list in reverse
+            # and remove any whose padding is <= the passed device.
+            # Returns the updated list with the new device appended
+            pad = get_pad(device)
+            while True:
+                if len(devices) and get_pad(devices[-1]) <= pad:
+                    devices.pop(-1) # Remove the last element
+                else:
+                    break # Bail out of the loop
+            devices.append(device)
+            return devices
+
+        # Let's walk the ioreg until we find our IOHDACodecDevice entries,
+        # keeping track of nested devices by their indentation to retain
+        # whichever the codec belongs to.
+        devices = []
         codecs = []
-        current_codec = {}
-        for x in iohda:
-            if "<class IOHDACodecDevice," in x:
-                current_codec["line"] = x
-                current_codec["info"] = {}
-            elif any((y in x for y in ("IOHDACodecVendorID","IOHDACodecRevisionID","IOHDACodecAddress"))):
+        for line in self.i.get_ioreg():
+            if "  <class IOPCIDevice," in line:
+                # Got a device - compare it to our existing device list
+                devices = trim_devices(devices,line)
+            elif "  <class IOHDACodecDevice," in line and devices:
+                # Got a codec - save some info
                 try:
-                    current_codec["info"][x.split('"')[1]] = x.split(" = ")[-1]
+                    codecs.append({
+                        "line": line,
+                        "info": self.i.get_device_info(line)[0]["parts"],
+                        "device": devices[-1],
+                        "device_name": devices[-1].split("+-o ")[1].split("@")[0],
+                        "device_path": self.i.get_device_path(devices[-1])
+                    })
                 except:
                     pass
-            elif x.replace("|","").strip() == "}": # Closing bracket
-                # find the line in ioreg, then walk the path backwards to get the
-                # device path
-                if "line" in current_codec: # Only do this if we have the line
-                    pad = found = None
-                    path = []
-                    for l in ioreg[::-1]:
-                        if current_codec["line"] in l:
-                            # Found it - gather pad, enable found
-                            pad = len(l.split("+")[0])
-                            found = True
-                        if not found: continue # Don't care unless we're found
-                        # Check for <class IOPCIDevice, and get pad if shorter
-                        if any((y in l for y in ("<class IOPCIDevice,","<class IOACPIPlatformDevice,"))):
-                            if pad is None or len(l.split("+")[0]) < pad:
-                                # Set new pad - and retain the path dealio
-                                pad = len(l.split("+")[0])
-                                path.append(l.split("+-o ")[1].split("  <class")[0])
-                    current_codec["path"] = path[::-1]
-                    current_codec["device_name"] = path[0].split("@")[0]
-                    dev_path = []
-                    # Walk the path, and convert from ioreg devices to Device Path
-                    for p in current_codec["path"]:
-                        parts = p.split("@")[-1]
-                        major = minor = "0"
-                        try: major,minor = parts.split(",")
-                        except: major = parts
-                        if not dev_path:
-                            dev_path.append("PciRoot(0x{})".format(major))
-                        else:
-                            dev_path.append("Pci(0x{},0x{})".format(major,minor))
-                    current_codec["device_path"] = "/".join(dev_path)
-                    codecs.append(current_codec)
-                current_codec = {}
         return codecs
 
     def get_audio_volume(self, key = "SystemAudioVolume"):
@@ -193,8 +184,14 @@ class BootChime:
         for i,x in enumerate(self.codecs,start=1):
             print("- {}. {} - {}:".format(i,x["device_name"],x["device_path"]))
             if x["info"]:
-                for y in x["info"]:
-                    print("  - {}: {}".format(y,x["info"][y]))
+                keys = ("IOHDACodecVendorID","IOHDACodecRevisionID","IOHDACodecAddress")
+                pad  = len(max(keys,key=len))
+                for y in keys:
+                    val = x["info"].get(y,"MISSING VALUE!")
+                    # Try to convert to hex
+                    try: val = "0x"+hex(int(val))[2:].upper()
+                    except: pass
+                    print("  - {}: {}".format(y.rjust(pad),val))
             else:
                 print("  - Missing information!")
         print("")
