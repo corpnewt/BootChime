@@ -40,17 +40,17 @@ class BootChime:
             # Returns the number of chars before hitting +-o
             return len(device.split("+-o ")[0])
 
-        def trim_devices(devices,device):
-            # Helper to walk the passed devices list in reverse
-            # and remove any whose padding is <= the passed device.
-            # Returns the updated list with the new device appended
+        def trim_devices(devices,device,append=True):
+            # Helper to walk the passed devices list in reverse and remove any
+            # whose padding is >= the passed device.
+            # Returns the updated list with the new device optionally appeneded.
             pad = get_pad(device)
             while True:
-                if len(devices) and get_pad(devices[-1]) <= pad:
-                    devices.pop(-1) # Remove the last element
-                else:
+                d_pad = get_pad(devices[-1]) if devices else -1
+                if d_pad == -1 or d_pad < pad:
                     break # Bail out of the loop
-            devices.append(device)
+                devices.pop(-1) # Remove the last element
+            if append: devices.append(device)
             return devices
 
         # Let's walk the ioreg until we find our IOHDACodecDevice entries,
@@ -59,11 +59,13 @@ class BootChime:
         devices = []
         codecs = []
         for line in self.i.get_ioreg():
-            if "  <class IOPCIDevice," in line:
-                # Got a device - compare it to our existing device list
+            if any((x in line for x in ("  <class IOPCIDevice,","  <class IOACPIPlatformDevice,"))):
+                # Got a PCI/ACPI device - compare it to our existing device list
                 devices = trim_devices(devices,line)
             elif "  <class IOHDACodecDevice," in line and devices:
-                # Got a codec - save some info
+                # Got a codec - save some info.  Ensure we have only devices that
+                # could be parents to this IOHDACodecDevice
+                devices = trim_devices(devices,line,append=False)
                 try:
                     codecs.append({
                         "line": line,
