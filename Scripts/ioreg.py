@@ -9,6 +9,9 @@ class IOReg:
     def _get_hex_addr(self,item):
         # Attempts to reformat an item from NAME@X,Y to NAME@X000000Y
         try:
+            if not "@" in item:
+                # If no address - assume 0
+                item = "{}@0".format(item)
             name,addr = item.split("@")
             if "," in addr:
                 cont,port = addr.split(",")
@@ -26,6 +29,9 @@ class IOReg:
     def _get_dec_addr(self,item):
         # Attemps to reformat an item from NAME@X000000Y to NAME@X,Y
         try:
+            if not "@" in item:
+                # If no address - assume 0
+                item = "{}@0".format(item)
             name,addr = item.split("@")
             if addr.count(",")==1:
                 # Using NAME@X,Y formating already
@@ -47,6 +53,8 @@ class IOReg:
         # Expects a XXXX@Y style string
         force = kwargs.get("force",False)
         plane = kwargs.get("plane","IOService")
+        allow_fallback = kwargs.get("allow_fallback",True)
+        fallback_uid = kwargs.get("fallback_uid",0)
         if force or not self.ioreg.get(plane,None):
             self.ioreg[plane] = self.r.run({"args":["ioreg", "-lw0", "-p", plane]})[0].split("\n")
         # Ensure our item ends with 2 spaces
@@ -71,6 +79,8 @@ class IOReg:
                     # Some _UIDs are strings - but we won't accept that here
                     # as we're ripping it specifically for PciRoot/Pci pathing
                     break
+        if item_uid is None and allow_fallback:
+            return fallback_uid
         return item_uid
 
     def get_ioreg(self,**kwargs):
@@ -143,20 +153,35 @@ class IOReg:
                 pass
         return dev
 
-    def _walk_path(self,path):
+    def _walk_path(self,path,classes=("IOPCIDevice","IOACPIPlatformDevice")):
         # Got a path - walk backward
         out = []
         prefix = None
+        class_match = []
+        if classes:
+            # Ensure all our classes start with <class
+            # and end with ,
+            for c in classes:
+                c = str(c).strip()
+                if not c.startswith("<class "):
+                    c = "<class "+c
+                if not c.endswith(","):
+                    c += ","
+                class_match.append(c)
         # Work in reverse to find our path
         for x in path[::-1]:
+            if not "+-o " in x:
+                continue # Not a class entry
+            if class_match and not any(c in x for c in class_match):
+                continue # Not the right class
             parts = x.split("+-o ")
             if prefix is None or len(parts[0]) < len(prefix):
                 # Path length changed, must be parent?
                 item = parts[1].split("  ")[0]
                 prefix = parts[0]
                 out.append(self._get_hex_addr(item))
-        # Reverse the path
-        out = out[::-1]
+        # Reverse the path - ensure we use / as the root
+        out = [""]+out[::-1]
         return "/".join(out)
 
     def get_acpi_path(self, device, **kwargs):
@@ -191,13 +216,11 @@ class IOReg:
         path = self.get_acpi_path(device, **kwargs)
         if not path:
             return ""
-        out = path.split("/")
+        out = path.lstrip("/").split("/")
         dev_path = ""
         for x in out:
-            if not "@" in x:
-                continue
             if not len(dev_path):
-                # First entry
+                # First entry - assume a PCI Root
                 _uid = self._get_pcix_uid(x)
                 if _uid is None:
                     # Broken path
