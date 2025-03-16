@@ -33,49 +33,61 @@ class BootChime:
             print("Could not save settings:  {}".format(repr(e)))
         os.chdir(cwd)
 
-    def get_codecs(self):
-        if self.codecs: return self.codecs
-
-        def get_pad(device):
-            # Returns the number of chars before hitting +-o
-            return len(device.split("+-o ")[0])
-
-        def trim_devices(devices,device,append=True):
-            # Helper to walk the passed devices list in reverse and remove any
-            # whose padding is >= the passed device.
-            # Returns the updated list with the new device optionally appeneded.
-            pad = get_pad(device)
-            while True:
-                d_pad = get_pad(devices[-1]) if devices else -1
-                if d_pad == -1 or d_pad < pad:
-                    break # Bail out of the loop
-                devices.pop(-1) # Remove the last element
-            if append: devices.append(device)
-            return devices
-
-        # Let's walk the ioreg until we find our IOHDACodecDevice entries,
-        # keeping track of nested devices by their indentation to retain
-        # whichever the codec belongs to.
-        devices = []
+    def _get_codecs(self):
+        # Get our audio codec list
+        ioreg = self.r.run({"args":["ioreg","-d1","-rn","IOHDACodecDevice"]})[0].split("\n")
+        # Iterate the list looking for devices
         codecs = []
-        for line in self.i.get_ioreg():
-            if any((x in line for x in ("  <class IOPCIDevice,","  <class IOACPIPlatformDevice,"))):
-                # Got a PCI/ACPI device - compare it to our existing device list
-                devices = trim_devices(devices,line)
-            elif "  <class IOHDACodecDevice," in line and devices:
-                # Got a codec - save some info.  Ensure we have only devices that
-                # could be parents to this IOHDACodecDevice
-                devices = trim_devices(devices,line,append=False)
+        codec = {}
+        primed = False
+        for x in ioreg:
+            if "+-o " in x and "IOHDACodecDevice" in x:
+                # Got a codec - prime it
+                primed = True
+                # Get the codec name and address
+                codec["name"] = x.split("+-o ")[1].split("  ")[0]
+                codec["addr"] = "0" if not "@" in codec["name"] else codec["name"].split("@")[-1]
+                codec["line"] = x
+                codec["info"] = {}
+                continue
+            if primed:
+                if x.replace("|","").strip() == "}":
+                    # Not primed anymore - reset the info
+                    codecs.append(codec)
+                    codec = {}
+                    continue
+                # Just gathering info
                 try:
-                    codecs.append({
-                        "line": line,
-                        "info": self.i.get_device_info(line)[0]["parts"],
-                        "device": devices[-1],
-                        "device_name": devices[-1].split("+-o ")[1].split("@")[0],
-                        "device_path": self.i.get_device_path(devices[-1])
-                    })
+                    name = x.split(" = ")[0].split('"')[1]
+                    codec["info"][name] = x.split(" = ")[1]
                 except:
                     pass
+        return codecs
+
+    def get_codecs(self):
+        if self.codecs: return self.codecs
+        # Gather our IOHDACodecDevices
+        _codecs = self._get_codecs()
+        # Gather our PCI devices
+        all_devs = self.i.get_all_devices()
+        # Match by address
+        codecs = []
+        for codec in _codecs:
+            longest_match = 0
+            device = None
+            for dev in all_devs.values():
+                dev_addr = dev["addr"]
+                addr_len = len(dev_addr)
+                if codec["addr"].startswith(dev_addr) and addr_len>longest_match:
+                    # Got a longer match
+                    longest_match = addr_len
+                    device = dev
+            codecs.append({
+                "line": codec["line"],
+                "info": codec["info"],
+                "device_name": device["name"] if device else "Unknown Device",
+                "device_path": device["device_path"] if device else "Unkown Path"
+            })
         return codecs
 
     def get_audio_volume(self, key = "SystemAudioVolume"):
